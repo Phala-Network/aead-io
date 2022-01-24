@@ -29,12 +29,9 @@ where
         Self::Uninit(aead)
     }
     fn init(&mut self, nonce: &Nonce<A, S>) -> Result<(), aead::Error> {
-        match self {
-            Self::Uninit(aead) => {
-                let aead = unsafe { core::mem::replace(aead, core::mem::zeroed()) };
-                *self = Self::Decryptor(Decryptor::from_aead(aead, &nonce))
-            }
-            Self::Decryptor(_) => {}
+        match core::mem::replace(self, Self::Empty) {
+            Self::Uninit(aead) => *self = Self::Decryptor(Decryptor::from_aead(aead, &nonce)),
+            Self::Decryptor(decryptor) => *self = Self::Decryptor(decryptor),
             Self::Empty => return Err(aead::Error),
         }
         Ok(())
@@ -52,16 +49,9 @@ where
         }
     }
     fn take(&mut self) -> Option<Decryptor<A, S>> {
-        match self {
-            Self::Decryptor(decryptor) => {
-                let decryptor = unsafe { core::mem::replace(decryptor, core::mem::zeroed()) };
-                *self = Self::Empty;
-                Some(decryptor)
-            }
-            Self::Uninit(_) => {
-                *self = Self::Empty;
-                None
-            }
+        match core::mem::replace(self, Self::Empty) {
+            Self::Decryptor(decryptor) => Some(decryptor),
+            Self::Uninit(_) => None,
             Self::Empty => None,
         }
     }
@@ -73,8 +63,6 @@ where
 pub struct DecryptBufReader<A, B, R, S>
 where
     A: AeadInPlace + NewAead,
-    B: ResizeBuffer + CappedBuffer,
-    R: Read,
     S: StreamPrimitive<A> + NewStream<A>,
     A::NonceSize: Sub<S::NonceOverhead>,
     NonceSize<A, S>: ArrayLength<u8>,
@@ -91,7 +79,6 @@ impl<A, B, R, S> DecryptBufReader<A, B, R, S>
 where
     A: AeadInPlace + NewAead,
     B: ResizeBuffer + CappedBuffer,
-    R: Read,
     S: StreamPrimitive<A> + NewStream<A>,
     A::NonceSize: Sub<S::NonceOverhead>,
     NonceSize<A, S>: ArrayLength<u8>,
@@ -141,7 +128,17 @@ where
     pub fn into_inner(self) -> R {
         self.reader
     }
+}
 
+impl<A, B, R, S> DecryptBufReader<A, B, R, S>
+where
+    A: AeadInPlace + NewAead,
+    B: ResizeBuffer + CappedBuffer,
+    R: Read,
+    S: StreamPrimitive<A> + NewStream<A>,
+    A::NonceSize: Sub<S::NonceOverhead>,
+    NonceSize<A, S>: ArrayLength<u8>,
+{
     fn read_chunk_size(&mut self) -> Result<(), Error<R::Error>> {
         let mut bytes_to_read = [0u8; 4];
         let mut offset = 0;
